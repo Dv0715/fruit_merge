@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>水果融合遊戲</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+    }
+    .bg-wrapper {
+      position: fixed;
+      width: 100vw;
+      height: 100vh;
+      z-index: -1;
+      display: flex;
+      flex-direction: column;
+    }
+    .bg-top {
+      flex: 1;
+      display: flex;
+    }
+    .bg-left, .bg-right {
+      flex: 1;
+      background-size: cover;
+      background-position: center;
+    }
+    .bg-left {
+      background-image: url('./assets/BG_L.png');
+    }
+    .bg-right {
+      background-image: url('./assets/BG_R.png');
+    }
+    .bg-center {
+      width: 390px;
+      background-image: url('./assets/BG_M.png');
+      background-size: cover;
+      background-position: center;
+  
+    }
+    .bg-bottom {
+      height: 100px;
+      background-image: url('./assets/BG_D.png');
+      background-size: cover;
+      background-position: center;
+    }
+    canvas {
+      display: block;
+      margin: 0 auto;
+      position: relative;
+      z-index: 1;
+    }
+    #score, #best-score {
+      position: absolute;
+      font-family: sans-serif;
+      z-index: 5;
+      left: 10px;
+    }
+    #score { top: 10px; font-size: 24px; }
+    #best-score { top: 40px; font-size: 16px; }
+    .score-float {
+      position: absolute;
+      color: gold;
+      font-size: 38px;
+      animation: floatUp 1s ease-out forwards;
+      pointer-events: none;
+      z-index: 10;
+    }
+    @keyframes floatUp {
+      0% { opacity: 1; transform: translateY(0); }
+      100% { opacity: 0; transform: translateY(-50px); }
+    }
+    @keyframes flashExpand {
+      0% { transform: scale(0.2); opacity: 1; }
+      100% { transform: scale(2); opacity: 0; }
+    }
+    .flash-circle {
+      position: absolute;
+      width: 60px;
+      height: 60px;
+      background: rgba(255, 255, 0, 0.6);
+      border-radius: 50%;
+      pointer-events: none;
+      animation: flashExpand 0.5s ease-out forwards;
+      z-index: 15;
+    }
+    #preview-fruit {
+      position: absolute;
+      top: 0;
+      left: 0;
+      pointer-events: none;
+      z-index: 3;
+    }
+  </style>
+</head>
+<body onmousemove="updateMouseX(event)">
+  <div class="bg-wrapper">
+    <div class="bg-top">
+      <div class="bg-left"></div>
+      <div class="bg-center"></div>
+      <div class="bg-right"></div>
+    </div>
+    <div class="bg-bottom"></div>
+  </div>
+  <div id="score">Score: 0</div>
+  <div id="best-score">Best: 0</div>
+  <img id="preview-fruit" src="" style="display:none;width:60px;height:60px;" />
+  <audio id="merge-sound" src="./assets/merge.mp3"></audio>
+  <canvas id="gameCanvas" width="390" height="844"></canvas>
+  <script>
+let mouseX = 195;
+function updateMouseX(event) {
+  const canvas = document.getElementById('gameCanvas');
+  const rect = canvas.getBoundingClientRect();
+  mouseX = Math.min(Math.max(event.clientX - rect.left, 30), 360);
+  document.getElementById('preview-fruit').style.left = (mouseX - 30 + rect.left) + 'px';
+}
+
+const { Engine, Render, Runner, World, Bodies, Events } = Matter;
+const canvas = document.getElementById('gameCanvas');
+const width = canvas.width;
+const height = canvas.height;
+
+const engine = Engine.create();
+const world = engine.world;
+const render = Render.create({
+  canvas,
+  engine,
+  options: { width, height, wireframes: false, background: 'transparent' }
+});
+Render.run(render);
+Runner.run(Runner.create(), engine);
+
+World.add(world, [
+  Bodies.rectangle(width / 2, height + 20, width, 40, { isStatic: true }),
+  Bodies.rectangle(-20, height / 2, 40, height, { isStatic: true }),
+  Bodies.rectangle(width + 20, height / 2, 40, height, { isStatic: true })
+]);
+
+const fruitList = [
+  { name: '1R', radius: 30, image: './assets/1R.png' },
+  { name: '2R', radius: 40, image: './assets/2R.png' },
+  { name: '3R', radius: 50, image: './assets/3R.png' },
+  { name: '4R', radius: 60, image: './assets/4R.png' },
+  { name: '5R', radius: 70, image: './assets/5R.png' },
+  { name: '6R', radius: 80, image: './assets/6R.png' },
+  { name: '7R', radius: 90, image: './assets/7R.png' },
+  { name: '8R', radius: 100, image: './assets/8R.png' }
+];
+
+let score = 0;
+let dropCount = 0;
+let nextFruitIndex = 0;
+let gameOver = false;
+const scoreEl = document.getElementById('score');
+const bestScoreEl = document.getElementById('best-score');
+let bestScore = parseInt(localStorage.getItem('bestScore')) || 0;
+bestScoreEl.textContent = 'Best: ' + bestScore;
+
+function createFruit(x, y, typeIndex = 0) {
+  const fruit = fruitList[typeIndex];
+  const body = Bodies.circle(x, y, fruit.radius, {
+    restitution: 0.5,
+    render: {
+      sprite: {
+        texture: fruit.image,
+        xScale: (fruit.radius * 2) / 128,
+        yScale: (fruit.radius * 2) / 128
+      }
+    }
+  });
+  body.fruitType = typeIndex;
+  return body;
+}
+
+function addFruit() {
+  if (gameOver) return;
+  const fruit = createFruit(mouseX, 0, nextFruitIndex);
+  World.add(world, fruit);
+  dropCount++;
+  if (dropCount < 3) {
+    nextFruitIndex = 0;
+  } else {
+    const allowedIndices = [0, 1, 2, 3];
+    nextFruitIndex = allowedIndices[Math.floor(Math.random() * allowedIndices.length)];
+  }
+  updatePreviewImage();
+}
+
+function updatePreviewImage() {
+  const fruit = fruitList[nextFruitIndex];
+  const img = document.getElementById('preview-fruit');
+  img.src = fruit.image;
+  img.style.display = 'block';
+}
+updatePreviewImage();
+
+canvas.addEventListener('click', () => {
+  addFruit();
+});
+
+Events.on(engine, 'collisionStart', function (event) {
+  const pairs = event.pairs;
+  for (let i = 0; i < pairs.length; i++) {
+    const a = pairs[i].bodyA, b = pairs[i].bodyB;
+    if (a.fruitType !== undefined && b.fruitType !== undefined && a.fruitType === b.fruitType && a.id !== b.id) {
+      const nextType = a.fruitType + 1;
+      if (nextType < fruitList.length) {
+        const newFruit = createFruit((a.position.x + b.position.x) / 2, (a.position.y + b.position.y) / 2, nextType);
+        World.add(world, newFruit);
+      }
+
+      const flash = document.createElement('div');
+      flash.className = 'flash-circle';
+      const canvasRect = canvas.getBoundingClientRect();
+      const centerX = ((a.position.x + b.position.x) / 2) + canvasRect.left;
+      const centerY = ((a.position.y + b.position.y) / 2) + canvasRect.top;
+      flash.style.left = (centerX - 30) + 'px';
+      flash.style.top = (centerY - 30) + 'px';
+      document.body.appendChild(flash);
+      setTimeout(() => document.body.removeChild(flash), 500);
+
+      World.remove(world, a);
+      World.remove(world, b);
+
+      const el = document.createElement('div');
+      el.className = 'score-float';
+      el.style.left = centerX + 'px';
+      el.style.top = centerY + 'px';
+      el.innerText = '+10';
+      document.body.appendChild(el);
+      setTimeout(() => document.body.removeChild(el), 1000);
+
+      score += 10;
+      scoreEl.textContent = 'Score: ' + score;
+      if (score > bestScore) {
+        bestScore = score;
+        bestScoreEl.textContent = 'Best: ' + bestScore;
+        localStorage.setItem('bestScore', bestScore);
+      }
+    }
+  }
+});
+  </script>
+</body>
+</html>
